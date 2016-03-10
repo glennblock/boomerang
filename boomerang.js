@@ -651,113 +651,49 @@ BOOMR_check_doc_domain();
 				}
 			},
 
-			pushVars: function(form, vars, prefix) {
+			
+			pushVars: function(obj, vars, prefix) {
 				var k, i, l=0, input;
 
 				for (k in vars) {
 					if (vars.hasOwnProperty(k)) {
 						if (Object.prototype.toString.call(vars[k]) === "[object Array]") {
 							for (i = 0; i < vars[k].length; ++i) {
-								l += BOOMR.utils.pushVars(form, vars[k][i], k + "[" + i + "]");
+								l += BOOMR.utils.pushVarsJson(form, vars[k][i], k + "[" + i + "]");
 							}
 						}
 						else {
-							input = document.createElement("input");
-							input.type = "hidden";	// we need `hidden` to preserve newlines. see commit message for more details
-							input.name = (prefix ? (prefix + "[" + k + "]") : k);
-							input.value = (vars[k]===undefined || vars[k]===null ? "" : vars[k]);
-
-							form.appendChild(input);
-
-							l += encodeURIComponent(input.name).length + encodeURIComponent(input.value).length + 2;
+							obj[(prefix ? (prefix + "[" + k + "]") : k)] = (vars[k]===undefined || vars[k]===null ? "" : vars[k]);
+							l++;
 						}
 					}
 				}
 
-				return l;
+				return l;				
 			},
+			
+			sendData: function(obj) {
+				var eventPayload = {event:obj, "sourcetype":"boomerang:splunk"};
 
-			sendData: function(form, method) {
-				var input = document.createElement("input"),
-				    urls = [ impl.beacon_url ];
-
-				form.method = method;
-				form.id = "beacon_form";
-
-				// TODO: Determine if we want to send as JSON
-				//if (window.JSON) {
-				//	form.innerHTML = "";
-				//	form.enctype = "text/plain";
-				//	input.name = "data";
-				//	input.value = JSON.stringify(impl.vars);
-				//	form.appendChild(input);
-				//} else {
-				form.enctype = "application/x-www-form-urlencoded";
-				//}
-
-				if (impl.secondary_beacons && impl.secondary_beacons.length) {
-					urls.push.apply(urls, impl.secondary_beacons);
+				eventPayload.source = (impl.splunk_source ? impl.splunk_source : "boomerang.js");
+				
+				if (impl.splunk_host) {
+					eventPayload.host = impl.splunk_host;
 				}
 
+				var json = JSON.stringify(eventPayload);
+				var http = new XMLHttpRequest();
+				http.open("POST", impl.beacon_url, true);
 
-				function remove(id) {
-					var el = document.getElementById(id);
-					if (el) {
-						el.parentNode.removeChild(el);
-					}
-				}
-
-				function submit() {
-					/*eslint-disable no-script-url*/
-					var iframe,
-					    name = "boomerang_post-" + encodeURIComponent(form.action) + "-" + Math.random();
-
-					// ref: http://terminalapp.net/submitting-a-form-with-target-set-to-a-script-generated-iframe-on-ie/
-					try {
-						iframe = document.createElement('<iframe name="' + name + '">');	// IE <= 8
-					}
-					catch (ignore) {
-						iframe = document.createElement("iframe");				// everything else
-					}
-
-					form.action = urls.shift();
-					iframe.name = iframe.id = name;
-
-					// IE Edge hangs for a minute on some sites when using form.submit().  This
-					// can be avoided by not setting the form.target, and adding the form to the
-					// iframe instead of the document.
-					iframe.style.display = form.style.display = "none";
-					iframe.src="javascript:false";
-
-					remove(iframe.id);
-					remove(form.id);
-
-					document.body.appendChild(iframe);
-
-					// Add the form to the iframe
-					iframe.appendChild(form);
-
-					try {
-						form.submit();
-					}
-					catch (ignore) {
-						// empty
-					}
-
-					if (urls.length) {
-						BOOMR.setImmediate(submit);
-					}
-
-					setTimeout(function() { remove(iframe.id); }, 10000);
-				}
-
-				submit();
-			}
+				//Send the proper header information along with the request
+				http.setRequestHeader("Authorization", "Splunk " + impl.splunk_token);
+				http.send(json);
+			},
 		},
 
 		init: function(config) {
 			var i, k,
-			    properties = ["beacon_url", "beacon_type", "site_domain", "user_ip", "strip_query_string", "secondary_beacons", "autorun"];
+			    properties = ["beacon_url", "beacon_type", "splunk_token", "splunk_source", "splunk_host", "site_domain", "user_ip", "strip_query_string", "secondary_beacons", "autorun"];
 
 			BOOMR_check_doc_domain();
 
@@ -769,7 +705,7 @@ BOOMR_check_doc_domain();
 				return this;
 			}
 
-			if (config.site_domain !== undefined) {
+			if (this.session && config.site_domain !== undefined) {
 				this.session.domain = config.site_domain;
 			}
 
@@ -1152,7 +1088,7 @@ BOOMR_check_doc_domain();
 		},
 
 		real_sendBeacon: function() {
-			var k, form, furl, img, length=0, errors=[], url, nparams=0;
+			var k, obj, furl, img, length=0, errors=[], url, nparams=0;
 
 			if (!impl.beaconQueued) {
 				return false;
@@ -1237,7 +1173,7 @@ BOOMR_check_doc_domain();
 				return true;
 			}
 
-			if (!BOOMR.hasVar("restiming")) {
+			if (false) {//!BOOMR.hasVar("restiming")) {
 				// Use an Image beacon if we're not sending ResourceTiming data
 
 				// if there are already url parameters in the beacon url,
@@ -1262,8 +1198,9 @@ BOOMR_check_doc_domain();
 				furl = impl.beacon_url + ((impl.beacon_url.indexOf("?") > -1)?"&":"?") + url.join("&");
 			}
 			else {
-				form = document.createElement("form");
-				length = BOOMR.utils.pushVars(form, impl.vars);
+				//form = document.createElement("form");
+				var obj = {};
+				length = BOOMR.utils.pushVars(obj, impl.vars);
 			}
 
 			// If we reach here, we've transferred all vars to the beacon URL.
@@ -1289,7 +1226,8 @@ BOOMR_check_doc_domain();
 			else {
 				// using 2000 here as a de facto maximum URL length based on:
 				// http://stackoverflow.com/questions/417142/what-is-the-maximum-length-of-a-url-in-different-browsers
-				BOOMR.utils.sendData(form, impl.beacon_type === "AUTO" ? (length > 2000 ? "POST" : "GET") : "POST");
+				console.log("sending NOW!");
+				BOOMR.utils.sendData(obj);
 			}
 
 			return true;
